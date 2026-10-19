@@ -30,4 +30,11 @@ android {
         jvmTarget = "17"
     }
 }    implementation("androidx.core:core-ktx:1.15.0")
+compileOptions {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
 }
+
+kotlinOptions {
+    jvmTarget = "17"
+}}
