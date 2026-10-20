@@ -1,0 +1,474 @@
+
+name: Gerar APK Lotofacil V5 Automatico
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/gerar-apk-v5-automatico.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Criar projeto Android
+        shell: bash
+        run: |
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "MeuImportadorLotofacil"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.6.1" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          EOF
+
+          mkdir -p app/src/main/java/com/meuimportador/lotofacil
+          mkdir -p app/src/main/res/xml
+          mkdir -p app/src/main/res/values
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+          }
+          android {
+              namespace = "com.meuimportador.lotofacil"
+              compileSdk = 35
+              defaultConfig {
+                  applicationId = "com.meuimportador.lotofacil"
+                  minSdk = 23
+                  targetSdk = 28
+                  versionCode = 5
+                  versionName = "5.0"
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:label="Meu Importador Lotofacil V5"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".MarcadorService"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+                      android:exported="false">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService"/>
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.accessibilityservice"
+                          android:resource="@xml/marcador_config"/>
+                  </service>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/xml/marcador_config.xml <<'EOF'
+          <accessibility-service
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeWindowContentChanged|typeWindowStateChanged|typeViewClicked"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:notificationTimeout="200"
+              android:canRetrieveWindowContent="true"
+              android:description="@string/service_description"/>
+          EOF
+
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="service_description">Marca dezenas da Lotofacil mediante ativacao do usuario, sem confirmar apostas.</string>
+          </resources>
+          EOF
+
+          cat > app/src/main/java/com/meuimportador/lotofacil/MainActivity.kt <<'EOF'
+          package com.meuimportador.lotofacil
+
+          import android.app.Activity
+          import android.os.Bundle
+          import android.content.Intent
+          import android.content.Context
+          import android.content.ClipData
+          import android.content.ClipboardManager
+          import android.net.Uri
+          import android.provider.Settings
+          import android.widget.*
+
+          class MainActivity : Activity() {
+              private val jogos = mutableListOf<List<Int>>()
+              private var indice = 0
+              private lateinit var status: TextView
+              private lateinit var exibicao: TextView
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  val root = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(20, 20, 20, 20)
+                  }
+                  val scroll = ScrollView(this)
+                  scroll.addView(root)
+
+                  root.addView(TextView(this).apply {
+                      text = "MEU IMPORTADOR LOTOFACIL V5"
+                      textSize = 22f
+                  })
+                  status = TextView(this).apply {
+                      text = "Importe seus jogos TXT"
+                      textSize = 17f
+                  }
+                  exibicao = TextView(this).apply {
+                      textSize = 23f
+                      setPadding(0, 20, 0, 20)
+                  }
+                  root.addView(status)
+                  root.addView(exibicao)
+
+                  fun botao(nome: String, acao: () -> Unit) {
+                      root.addView(Button(this).apply {
+                          text = nome
+                          setOnClickListener { acao() }
+                      })
+                  }
+
+                  botao("IMPORTAR JOGOS TXT") {
+                      startActivityForResult(
+                          Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                              addCategory(Intent.CATEGORY_OPENABLE)
+                              type = "*/*"
+                          }, 100
+                      )
+                  }
+
+                  botao("COPIAR JOGO ATUAL") {
+                      if (jogos.isNotEmpty())
+                          copiar(formatar(jogos[indice]))
+                  }
+
+                  botao("PROXIMO JOGO") {
+                      if (indice < jogos.lastIndex) {
+                          indice++
+                          mostrar()
+                      }
+                  }
+
+                  botao("JOGO ANTERIOR") {
+                      if (indice > 0) {
+                          indice--
+                          mostrar()
+                      }
+                  }
+
+                  botao("ABRIR LOTERIAS CAIXA") {
+                      abrirCaixa()
+                  }
+
+                  botao("ATIVAR ACESSIBILIDADE") {
+                      startActivity(Intent(
+                          Settings.ACTION_ACCESSIBILITY_SETTINGS
+                      ))
+                  }
+
+                  botao("MARCAR JOGO ATUAL AUTOMATICAMENTE") {
+                      if (jogos.isEmpty()) {
+                          status.text = "Importe os jogos primeiro"
+                      } else {
+                          MarcadorService.preparar(jogos[indice])
+                          status.text = "Marcacao preparada"
+                          abrirCaixa()
+                      }
+                  }
+
+                  botao("PARAR MARCACAO") {
+                      MarcadorService.parar()
+                      status.text = "Marcacao parada"
+                  }
+
+                  botao("COPIAR TODOS OS JOGOS") {
+                      if (jogos.isNotEmpty())
+                          copiar(jogos.joinToString("\n") {
+                              formatar(it)
+                          })
+                  }
+
+                  botao("REINICIAR SEQUENCIA") {
+                      indice = 0
+                      mostrar()
+                  }
+
+                  botao("LIMPAR JOGOS") {
+                      MarcadorService.parar()
+                      jogos.clear()
+                      indice = 0
+                      mostrar()
+                  }
+
+                  mostrar()
+                  setContentView(scroll)
+              }
+
+              private fun abrirCaixa() {
+                  startActivity(Intent(
+                      Intent.ACTION_VIEW,
+                      Uri.parse("https://www.loteriasonline.caixa.gov.br/")
+                  ))
+              }
+
+              private fun copiar(s: String) {
+                  val cm = getSystemService(
+                      Context.CLIPBOARD_SERVICE
+                  ) as ClipboardManager
+                  cm.setPrimaryClip(
+                      ClipData.newPlainText("Lotofacil", s)
+                  )
+                  status.text = "Copiado"
+              }
+
+              private fun formatar(j: List<Int>) =
+                  j.joinToString(" ") {
+                      "%02d".format(it)
+                  }
+
+              private fun mostrar() {
+                  exibicao.text = if (jogos.isEmpty())
+                      "Nenhum jogo carregado"
+                  else
+                      "JOGO ${indice + 1} DE ${jogos.size}\n" +
+                      formatar(jogos[indice])
+              }
+
+              @Deprecated("Android")
+              override fun onActivityResult(
+                  requestCode: Int,
+                  resultCode: Int,
+                  data: Intent?
+              ) {
+                  super.onActivityResult(
+                      requestCode, resultCode, data
+                  )
+                  if (requestCode != 100 ||
+                      resultCode != RESULT_OK) return
+
+                  try {
+                      val uri = data?.data ?: return
+                      val linhas = contentResolver
+                          .openInputStream(uri)!!
+                          .bufferedReader()
+                          .use { it.readLines() }
+
+                      val validos = mutableListOf<List<Int>>()
+                      var invalidos = 0
+
+                      for (linha in linhas.filter {
+                          it.isNotBlank()
+                      }) {
+                          val ns = Regex("\\d+")
+                              .findAll(linha)
+                              .map { it.value.toIntOrNull() }
+                              .toList()
+
+                          if (
+                              ns.size == 15 &&
+                              ns.all {
+                                  it != null && it in 1..25
+                              } &&
+                              ns.distinct().size == 15
+                          ) {
+                              validos.add(
+                                  ns.filterNotNull().sorted()
+                              )
+                          } else invalidos++
+                      }
+
+                      MarcadorService.parar()
+                      jogos.clear()
+                      jogos.addAll(validos)
+                      indice = 0
+                      mostrar()
+                      status.text =
+                          "${jogos.size} jogos importados; " +
+                          "$invalidos invalidos"
+                  } catch (e: Exception) {
+                      status.text = "Erro: ${e.message}"
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/meuimportador/lotofacil/MarcadorService.kt <<'EOF'
+          package com.meuimportador.lotofacil
+
+          import android.accessibilityservice.AccessibilityService
+          import android.view.accessibility.AccessibilityEvent
+          import android.view.accessibility.AccessibilityNodeInfo
+          import android.os.Handler
+          import android.os.Looper
+
+          class MarcadorService : AccessibilityService() {
+
+              companion object {
+                  @Volatile
+                  private var pendente: List<Int>? = null
+
+                  @Volatile
+                  private var versao = 0
+
+                  @Synchronized
+                  fun preparar(jogo: List<Int>) {
+                      pendente = jogo.toList()
+                      versao++
+                  }
+
+                  @Synchronized
+                  fun parar() {
+                      pendente = null
+                      versao++
+                  }
+              }
+
+              private val handler = Handler(Looper.getMainLooper())
+              private var ultimaVersao = -1
+              private var indice = 0
+              private var ocupado = false
+
+              override fun onAccessibilityEvent(
+                  event: AccessibilityEvent?
+              ) {
+                  val pacote = event?.packageName?.toString()
+                      ?: return
+
+                  if (pacote != "com.android.chrome" &&
+                      pacote != "com.sec.android.app.sbrowser") return
+
+                  val jogo = pendente ?: return
+
+                  if (ultimaVersao != versao) {
+                      ultimaVersao = versao
+                      indice = 0
+                      ocupado = false
+                  }
+
+                  if (ocupado || indice >= jogo.size) return
+
+                  ocupado = true
+                  val v = ultimaVersao
+                  handler.postDelayed({
+                      executarUm(v)
+                  }, 350)
+              }
+
+              private fun executarUm(v: Int) {
+                  ocupado = false
+                  if (v != versao) return
+
+                  val jogo = pendente ?: return
+                  if (indice >= jogo.size) return
+
+                  val raiz = rootInActiveWindow ?: return
+                  val dezena = jogo[indice]
+                  val alvos = mutableListOf<AccessibilityNodeInfo>()
+
+                  procurar(raiz, dezena, alvos)
+
+                  if (alvos.size != 1) return
+
+                  val alvo = alvos.single()
+
+                  if (alvo.isChecked) {
+                      indice++
+                      return
+                  }
+
+                  if (alvo.performAction(
+                      AccessibilityNodeInfo.ACTION_CLICK
+                  )) {
+                      indice++
+                  }
+
+                  if (indice == jogo.size) parar()
+              }
+
+              private fun procurar(
+                  no: AccessibilityNodeInfo,
+                  dezena: Int,
+                  saida: MutableList<AccessibilityNodeInfo>
+              ) {
+                  val texto = no.text?.toString()?.trim()
+                  val descricao =
+                      no.contentDescription?.toString()?.trim()
+
+                  val valores = listOf(
+                      dezena.toString(),
+                      "%02d".format(dezena)
+                  )
+
+                  if (no.isClickable &&
+                      (texto in valores || descricao in valores)) {
+                      saida.add(no)
+                  }
+
+                  for (i in 0 until no.childCount) {
+                      no.getChild(i)?.let {
+                          procurar(it, dezena, saida)
+                      }
+                  }
+              }
+
+              override fun onInterrupt() {
+                  parar()
+              }
+
+              override fun onDestroy() {
+                  parar()
+                  super.onDestroy()
+              }
+          }
+          EOF
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Compilar APK
+        run: gradle --no-daemon :app:assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MeuImportadorLotofacil-V5-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
