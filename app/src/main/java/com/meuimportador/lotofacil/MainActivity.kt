@@ -2,185 +2,231 @@
 package com.meuimportador.lotofacil
 
 import android.app.Activity
+import android.os.Bundle
+import android.content.Intent
+import android.net.Uri
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
+import android.widget.*
 import android.graphics.Typeface
-import android.net.Uri
-import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
-import android.widget.Toast
 
 class MainActivity : Activity() {
+
     private val jogos = mutableListOf<List<Int>>()
-    private val codigoImportacao = 100
-    private lateinit var resultado: TextView
-    private lateinit var listaJogos: LinearLayout
-    private lateinit var progresso: TextView
-    private lateinit var iniciar: Button
-    private lateinit var parar: Button
-    private val handler = Handler(Looper.getMainLooper())
-    private var executando = false
-    private var indiceAtual = 0
-    private var tarefa: Runnable? = null
+    private var atual = 0
+    private lateinit var status: TextView
+    private lateinit var numeros: TextView
+    private lateinit var contador: TextView
+    private lateinit var botoes: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val scroll = ScrollView(this)
         val tela = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24, 32, 24, 24)
+            setPadding(24, 24, 24, 24)
         }
-        tela.addView(TextView(this).apply {
-            text = "Meu Importador Lotofácil"
-            textSize = 25f
+
+        scroll.addView(tela)
+
+        val titulo = TextView(this).apply {
+            text = "MEU IMPORTADOR LOTOFÁCIL V4"
+            textSize = 22f
+            gravity = 17
             setTypeface(null, Typeface.BOLD)
-        })
-        tela.addView(Button(this).apply {
-            text = "IMPORTAR JOGOS"
-            setOnClickListener {
-                pararSequencia()
-                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    type = "text/plain"
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                }
-                startActivityForResult(intent, codigoImportacao)
-            }
-        })
-        tela.addView(Button(this).apply {
-            text = "ABRIR LOTERIAS CAIXA"
-            setOnClickListener {
-                try {
-                    startActivity(Intent(Intent.ACTION_VIEW,
-                        Uri.parse("https://www.loteriasonline.caixa.gov.br/")))
-                } catch (e: Exception) {
-                    Toast.makeText(this@MainActivity, "Não foi possível abrir o site", Toast.LENGTH_LONG).show()
-                }
-            }
-        })
-        resultado = TextView(this).apply {
-            text = "Selecione um arquivo TXT com seus jogos."
+        }
+        tela.addView(titulo)
+
+        status = TextView(this).apply {
+            text = "Importe seu arquivo TXT para começar."
             textSize = 17f
+            setPadding(0, 20, 0, 20)
         }
-        tela.addView(resultado)
-        progresso = TextView(this).apply {
-            text = "Sequência não iniciada"
-            textSize = 18f
+        tela.addView(status)
+
+        contador = TextView(this).apply {
+            textSize = 20f
+            gravity = 17
         }
-        tela.addView(progresso)
-        iniciar = Button(this).apply {
-            text = "INICIAR SIMULAÇÃO EM SEQUÊNCIA"
-            isEnabled = false
-            setOnClickListener { iniciarSequencia() }
+        tela.addView(contador)
+
+        numeros = TextView(this).apply {
+            textSize = 26f
+            gravity = 17
+            setPadding(8, 24, 8, 24)
         }
-        tela.addView(iniciar)
-        parar = Button(this).apply {
-            text = "PARAR SEQUÊNCIA"
-            isEnabled = false
-            setOnClickListener { pararSequencia() }
+        tela.addView(numeros)
+
+        botoes = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
         }
-        tela.addView(parar)
-        val rolagem = ScrollView(this)
-        listaJogos = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        rolagem.addView(listaJogos)
-        tela.addView(rolagem, LinearLayout.LayoutParams(-1, 0, 1f))
-        setContentView(tela)
+        tela.addView(botoes)
+
+        botao("IMPORTAR JOGOS TXT") {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+            }
+            startActivityForResult(intent, 100)
+        }
+
+        botao("COPIAR JOGO ATUAL") {
+            if (jogos.isNotEmpty()) {
+                val texto = formatar(jogos[atual])
+                val clipboard = getSystemService(
+                    Context.CLIPBOARD_SERVICE
+                ) as ClipboardManager
+                clipboard.setPrimaryClip(
+                    ClipData.newPlainText("Lotofácil", texto)
+                )
+                status.text = "Jogo ${atual + 1} copiado."
+            } else {
+                status.text = "Importe os jogos primeiro."
+            }
+        }
+
+        botao("PRÓXIMO JOGO") {
+            if (atual < jogos.size - 1) {
+                atual++
+                mostrarJogo()
+            } else {
+                status.text = "Último jogo da lista."
+            }
+        }
+
+        botao("JOGO ANTERIOR") {
+            if (atual > 0) {
+                atual--
+                mostrarJogo()
+            }
+        }
+
+        botao("ABRIR LOTERIAS CAIXA") {
+            val url = "https://www.loteriasonline.caixa.gov.br/"
+            startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            )
+        }
+
+        botao("COPIAR TODOS OS JOGOS") {
+            if (jogos.isNotEmpty()) {
+                val texto = jogos.joinToString("\n") {
+                    formatar(it)
+                }
+                val clipboard = getSystemService(
+                    Context.CLIPBOARD_SERVICE
+                ) as ClipboardManager
+                clipboard.setPrimaryClip(
+                    ClipData.newPlainText("Jogos Lotofácil", texto)
+                )
+                status.text = "${jogos.size} jogos copiados."
+            }
+        }
+
+        botao("REINICIAR SEQUÊNCIA") {
+            atual = 0
+            mostrarJogo()
+        }
+
+        botao("LIMPAR JOGOS") {
+            jogos.clear()
+            atual = 0
+            mostrarJogo()
+            status.text = "Lista limpa."
+        }
+
+        mostrarJogo()
+        setContentView(scroll)
     }
 
-    private fun copiar(jogo: List<Int>, numero: Int) {
-        val dezenas = jogo.joinToString(" ") { "%02d".format(it) }
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("Jogo $numero", dezenas))
-        Toast.makeText(this, "Jogo $numero copiado!", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun mostrarJogos(invalidos: Int) {
-        resultado.text = "Jogos válidos: ${jogos.size}\nLinhas inválidas: $invalidos\n"
-        listaJogos.removeAllViews()
-        jogos.forEachIndexed { indice, jogo ->
-            listaJogos.addView(TextView(this).apply {
-                text = "\nJogo ${indice + 1}:\n" + jogo.joinToString(" ") { "%02d".format(it) }
-                textSize = 19f
-                setTextIsSelectable(true)
-            })
-            listaJogos.addView(Button(this).apply {
-                text = "COPIAR JOGO ${indice + 1}"
-                setOnClickListener { copiar(jogo, indice + 1) }
-            })
+    private fun botao(
+        nome: String,
+        acao: () -> Unit
+    ) {
+        val botao = Button(this).apply {
+            text = nome
+            textSize = 16f
+            setOnClickListener { acao() }
         }
-        iniciar.isEnabled = jogos.isNotEmpty()
+        botoes.addView(botao)
     }
 
-    private fun iniciarSequencia() {
-        if (executando || jogos.isEmpty()) return
-        executando = true
-        indiceAtual = 0
-        iniciar.isEnabled = false
-        parar.isEnabled = true
-        avancarSequencia()
+    private fun formatar(jogo: List<Int>): String {
+        return jogo.joinToString(" ") {
+            "%02d".format(it)
+        }
     }
 
-    private fun avancarSequencia() {
-        if (!executando) return
-        if (indiceAtual >= jogos.size) {
-            executando = false
-            tarefa = null
-            progresso.text = "Simulação concluída: ${jogos.size} jogos percorridos. Nenhuma aposta enviada."
-            iniciar.isEnabled = true
-            parar.isEnabled = false
+    private fun mostrarJogo() {
+        if (jogos.isEmpty()) {
+            contador.text = "Nenhum jogo carregado"
+            numeros.text = ""
             return
         }
-        val jogo = jogos[indiceAtual]
-        progresso.text = "Simulação: jogo ${indiceAtual + 1} de ${jogos.size}\n" +
-            jogo.joinToString(" ") { "%02d".format(it) }
-        indiceAtual++
-        val proxima = Runnable { avancarSequencia() }
-        tarefa = proxima
-        handler.postDelayed(proxima, 1500L)
+
+        contador.text = "JOGO ${atual + 1} DE ${jogos.size}"
+        numeros.text = formatar(jogos[atual])
     }
 
-    private fun pararSequencia() {
-        executando = false
-        tarefa?.let { handler.removeCallbacks(it) }
-        tarefa = null
-        if (::progresso.isInitialized) progresso.text = "Sequência interrompida."
-        if (::iniciar.isInitialized) iniciar.isEnabled = jogos.isNotEmpty()
-        if (::parar.isInitialized) parar.isEnabled = false
-    }
+    @Deprecated("Compatibilidade Android")
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: Intent?
+    ) {
+        super.onActivityResult(
+            requestCode, resultCode, data
+        )
 
-    override fun onDestroy() {
-        pararSequencia()
-        super.onDestroy()
-    }
+        if (requestCode != 100 ||
+            resultCode != RESULT_OK
+        ) return
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != codigoImportacao || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
+
         try {
-            val texto = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                ?: throw IllegalStateException("Arquivo vazio ou inacessível")
+            val linhas = contentResolver
+                .openInputStream(uri)!!
+                .bufferedReader()
+                .use { it.readLines() }
+
             val novosJogos = mutableListOf<List<Int>>()
             var invalidos = 0
-            texto.lines().forEach { linha ->
-                val numeros = Regex("\\d+").findAll(linha).map { it.value.toIntOrNull() }.toList()
-                if (numeros.isEmpty()) return@forEach
-                if (numeros.size == 15 && numeros.all { it != null && it in 1..25 } &&
-                    numeros.filterNotNull().distinct().size == 15) {
-                    novosJogos.add(numeros.filterNotNull().sorted())
-                } else invalidos++
+
+            for (linha in linhas) {
+                if (linha.isBlank()) continue
+
+                val dezenas = Regex("\\d+")
+                    .findAll(linha)
+                    .map { it.value.toInt() }
+                    .toList()
+
+                if (
+                    dezenas.size == 15 &&
+                    dezenas.distinct().size == 15 &&
+                    dezenas.all { it in 1..25 }
+                ) {
+                    novosJogos.add(dezenas.sorted())
+                } else {
+                    invalidos++
+                }
             }
+
             jogos.clear()
             jogos.addAll(novosJogos)
-            progresso.text = "Sequência não iniciada"
-            mostrarJogos(invalidos)
+            atual = 0
+
+            status.text =
+                "${jogos.size} jogos importados. " +
+                "$invalidos linhas inválidas."
+
+            mostrarJogo()
+
         } catch (e: Exception) {
-            resultado.text = "Erro ao importar: ${e.message}"
+            status.text = "Erro: ${e.message}"
         }
     }
 }
+  
