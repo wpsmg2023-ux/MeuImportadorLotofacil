@@ -1,0 +1,371 @@
+
+name: Gerar APK Lotofacil V5 Seguro
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/gerar-apk-v5-seguro.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Criar projeto Android completo
+        shell: bash
+        run: |
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "MeuImportadorLotofacilV5"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.6.1" apply false
+              id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          EOF
+
+          mkdir -p app/src/main/java/com/meuimportador/lotofacil
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.meuimportador.lotofacil"
+              compileSdk = 35
+
+              defaultConfig {
+                  applicationId = "com.meuimportador.lotofacil.v5safe"
+                  minSdk = 23
+                  targetSdk = 35
+                  versionCode = 5
+                  versionName = "5.0-safe"
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:label="Meu Importador Lotofacil V5"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar"
+                  android:usesCleartextTraffic="false">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/meuimportador/lotofacil/MainActivity.kt <<'EOF'
+          package com.meuimportador.lotofacil
+
+          import android.app.Activity
+          import android.os.Bundle
+          import android.content.Intent
+          import android.content.Context
+          import android.content.ClipData
+          import android.content.ClipboardManager
+          import android.net.Uri
+          import android.widget.*
+          import android.graphics.Typeface
+
+          class MainActivity : Activity() {
+
+              private val jogos = mutableListOf<List<Int>>()
+              private var atual = 0
+
+              private lateinit var status: TextView
+              private lateinit var contador: TextView
+              private lateinit var numeros: TextView
+              private lateinit var botoes: LinearLayout
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  val scroll = ScrollView(this)
+
+                  val tela = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(24, 24, 24, 24)
+                  }
+
+                  scroll.addView(tela)
+
+                  tela.addView(TextView(this).apply {
+                      text = "MEU IMPORTADOR LOTOFACIL V5"
+                      textSize = 22f
+                      gravity = 17
+                      setTypeface(null, Typeface.BOLD)
+                  })
+
+                  status = TextView(this).apply {
+                      text = "Importe seus jogos TXT para começar."
+                      textSize = 17f
+                      setPadding(0, 20, 0, 20)
+                  }
+                  tela.addView(status)
+
+                  contador = TextView(this).apply {
+                      textSize = 20f
+                      gravity = 17
+                  }
+                  tela.addView(contador)
+
+                  numeros = TextView(this).apply {
+                      textSize = 26f
+                      gravity = 17
+                      setPadding(8, 24, 8, 24)
+                  }
+                  tela.addView(numeros)
+
+                  botoes = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                  }
+                  tela.addView(botoes)
+
+                  botao("IMPORTAR JOGOS TXT") {
+                      val intent = Intent(
+                          Intent.ACTION_OPEN_DOCUMENT
+                      ).apply {
+                          addCategory(Intent.CATEGORY_OPENABLE)
+                          type = "*/*"
+                      }
+                      startActivityForResult(intent, 100)
+                  }
+
+                  botao("COPIAR JOGO ATUAL") {
+                      if (jogos.isNotEmpty()) {
+                          copiar(formatar(jogos[atual]))
+                          status.text = "Jogo ${atual + 1} copiado."
+                      } else {
+                          status.text = "Importe jogos primeiro."
+                      }
+                  }
+
+                  botao("PROXIMO JOGO") {
+                      if (atual < jogos.lastIndex) {
+                          atual++
+                          mostrarJogo()
+                      } else {
+                          status.text = "Ultimo jogo da lista."
+                      }
+                  }
+
+                  botao("JOGO ANTERIOR") {
+                      if (atual > 0) {
+                          atual--
+                          mostrarJogo()
+                      }
+                  }
+
+                  botao("ABRIR LOTERIAS CAIXA") {
+                      val url = "https://www.loteriasonline.caixa.gov.br/"
+                      startActivity(
+                          Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                      )
+                  }
+
+                  botao("COPIAR TODOS OS JOGOS") {
+                      if (jogos.isNotEmpty()) {
+                          copiar(jogos.joinToString("\n") {
+                              formatar(it)
+                          })
+                          status.text = "${jogos.size} jogos copiados."
+                      }
+                  }
+
+                  botao("REINICIAR SEQUENCIA") {
+                      atual = 0
+                      mostrarJogo()
+                  }
+
+                  botao("LIMPAR JOGOS") {
+                      jogos.clear()
+                      atual = 0
+                      mostrarJogo()
+                      status.text = "Lista limpa."
+                  }
+
+                  mostrarJogo()
+                  setContentView(scroll)
+              }
+
+              private fun botao(
+                  nome: String,
+                  acao: () -> Unit
+              ) {
+                  botoes.addView(Button(this).apply {
+                      text = nome
+                      textSize = 16f
+                      setOnClickListener { acao() }
+                  })
+              }
+
+              private fun copiar(texto: String) {
+                  val clipboard = getSystemService(
+                      Context.CLIPBOARD_SERVICE
+                  ) as ClipboardManager
+
+                  clipboard.setPrimaryClip(
+                      ClipData.newPlainText("Lotofacil", texto)
+                  )
+              }
+
+              private fun formatar(jogo: List<Int>): String {
+                  return jogo.joinToString(" ") {
+                      "%02d".format(it)
+                  }
+              }
+
+              private fun mostrarJogo() {
+                  if (jogos.isEmpty()) {
+                      contador.text = "Nenhum jogo carregado"
+                      numeros.text = ""
+                      return
+                  }
+
+                  contador.text =
+                      "JOGO ${atual + 1} DE ${jogos.size}"
+                  numeros.text = formatar(jogos[atual])
+              }
+
+              @Deprecated("Compatibilidade Android")
+              override fun onActivityResult(
+                  requestCode: Int,
+                  resultCode: Int,
+                  data: Intent?
+              ) {
+                  super.onActivityResult(
+                      requestCode, resultCode, data
+                  )
+
+                  if (requestCode != 100 ||
+                      resultCode != RESULT_OK
+                  ) return
+
+                  val uri = data?.data ?: return
+
+                  try {
+                      val linhas = contentResolver
+                          .openInputStream(uri)!!
+                          .bufferedReader()
+                          .use { it.readLines() }
+
+                      val novosJogos =
+                          mutableListOf<List<Int>>()
+                      var invalidos = 0
+
+                      for (linha in linhas) {
+                          if (linha.isBlank()) continue
+
+                          val dezenas = Regex("\\d+")
+                              .findAll(linha)
+                              .mapNotNull {
+                                  it.value.toIntOrNull()
+                              }
+                              .toList()
+
+                          if (
+                              dezenas.size == 15 &&
+                              dezenas.distinct().size == 15 &&
+                              dezenas.all { it in 1..25 }
+                          ) {
+                              novosJogos.add(dezenas.sorted())
+                          } else {
+                              invalidos++
+                          }
+                      }
+
+                      jogos.clear()
+                      jogos.addAll(novosJogos)
+                      atual = 0
+
+                      status.text =
+                          "${jogos.size} jogos importados. " +
+                          "$invalidos linhas invalidas."
+
+                      mostrarJogo()
+
+                  } catch (e: Exception) {
+                      status.text = "Erro: ${e.message}"
+                  }
+              }
+          }
+          EOF
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Compilar APK
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verificar classes do APK
+        shell: bash
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+
+          test -s "$APK"
+          unzip -t "$APK"
+          unzip -p "$APK" classes.dex > /tmp/classes.dex
+
+          for CLASSE in MainActivity onCreate onActivityResult; do
+            if ! grep -a -q "$CLASSE" /tmp/classes.dex; then
+              echo "ERRO: classe ou metodo ausente: $CLASSE"
+              exit 1
+            fi
+          done
+
+          if grep -a -q "MarcadorService" /tmp/classes.dex; then
+            echo "ERRO: servico antigo encontrado"
+            exit 1
+          fi
+
+          echo "APK validado com codigo principal presente."
+
+      - name: Publicar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MeuImportadorLotofacil-V5-Seguro
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
