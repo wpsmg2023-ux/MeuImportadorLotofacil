@@ -1,5 +1,6 @@
 
 name: Gerar APK Lotofacil V5 Seguro
+run-name: Compilacao Lotofacil V5 Seguro
 
 on:
   workflow_dispatch:
