@@ -1,23 +1,23 @@
-
-name: Compilar APK Android
+name: Compilar APK Android Corrigido
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
+    timeout-minutes: 30
 
     steps:
       - name: Baixar projeto
         uses: actions/checkout@v4
 
-      - name: Configurar Java
+      - name: Configurar Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -28,11 +28,67 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Corrigir alvo Java e Kotlin para 17
+        shell: python
+        run: |
+          from pathlib import Path
+
+          kotlin_file = Path("app/build.gradle.kts")
+          groovy_file = Path("app/build.gradle")
+
+          if kotlin_file.exists():
+              arquivo = kotlin_file
+              ajuste = """
+          // Ajuste de compatibilidade Java e Kotlin
+          android {
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+          }
+
+          tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          """
+          elif groovy_file.exists():
+              arquivo = groovy_file
+              ajuste = """
+          // Ajuste de compatibilidade Java e Kotlin
+          android {
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+
+          tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+          }
+          """
+          else:
+              raise SystemExit(
+                  "Nao foi encontrado app/build.gradle.kts ou app/build.gradle."
+              )
+
+          conteudo = arquivo.read_text(encoding="utf-8")
+          arquivo.write_text(
+              conteudo + "\n" + ajuste,
+              encoding="utf-8"
+          )
+          print(f"Compatibilidade Java/Kotlin 17 aplicada em {arquivo}")
+
       - name: Compilar APK
-        run: gradle assembleDebug --stacktrace
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
 
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
-          name: MeuImportadorLotofacil-APK
+          name: MeuImportadorLotofacil-APK-Corrigido
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
