@@ -1,6 +1,5 @@
-
-name: Gerar APK Lotofacil V5 Seguro
-run-name: Compilacao Lotofacil V5 Seguro
+name: Gerar APK Lotofacil V5 Corrigido
+run-name: Compilacao Lotofacil V5 Corrigido
 
 on:
   workflow_dispatch:
@@ -8,19 +7,23 @@ on:
     paths:
       - '.github/workflows/gerar-apk-v5-seguro.yml'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Baixar projeto
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      
 
       - name: Criar projeto Android completo
         shell: bash
@@ -33,6 +36,7 @@ jobs:
                   gradlePluginPortal()
               }
           }
+
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
@@ -40,6 +44,7 @@ jobs:
                   mavenCentral()
               }
           }
+
           rootProject.name = "MeuImportadorLotofacilV5"
           include(":app")
           EOF
@@ -68,12 +73,21 @@ jobs:
               namespace = "com.meuimportador.lotofacil"
               compileSdk = 35
 
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+
               defaultConfig {
                   applicationId = "com.meuimportador.lotofacil.v5safe"
                   minSdk = 23
                   targetSdk = 35
-                  versionCode = 5
-                  versionName = "5.0-safe"
+                  versionCode = 6
+                  versionName = "5.1"
               }
           }
           EOF
@@ -82,6 +96,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <application
                   android:label="Meu Importador Lotofacil V5"
+                  android:allowBackup="false"
                   android:theme="@android:style/Theme.Material.Light.NoActionBar"
                   android:usesCleartextTraffic="false">
 
@@ -133,7 +148,7 @@ jobs:
                   scroll.addView(tela)
 
                   tela.addView(TextView(this).apply {
-                      text = "MEU IMPORTADOR LOTOFACIL V5"
+                      text = "MEU IMPORTADOR LOTOFACIL V5.1"
                       textSize = 22f
                       gravity = 17
                       setTypeface(null, Typeface.BOLD)
@@ -201,9 +216,14 @@ jobs:
 
                   botao("ABRIR LOTERIAS CAIXA") {
                       val url = "https://www.loteriasonline.caixa.gov.br/"
-                      startActivity(
-                          Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                      )
+                      try {
+                          startActivity(
+                              Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                          )
+                      } catch (e: android.content.ActivityNotFoundException) {
+                          status.text =
+                              "Nenhum navegador disponivel para abrir a CAIXA."
+                      }
                   }
 
                   botao("COPIAR TODOS OS JOGOS") {
@@ -228,7 +248,19 @@ jobs:
                   }
 
                   mostrarJogo()
+
+                  scroll.setOnApplyWindowInsetsListener { view, insets ->
+                      view.setPadding(
+                          insets.systemWindowInsetLeft,
+                          insets.systemWindowInsetTop,
+                          insets.systemWindowInsetRight,
+                          insets.systemWindowInsetBottom
+                      )
+                      insets
+                  }
+
                   setContentView(scroll)
+                  scroll.requestApplyInsets()
               }
 
               private fun botao(
@@ -301,8 +333,8 @@ jobs:
 
                           val dezenas = Regex("\\d+")
                               .findAll(linha)
-                              .mapNotNull {
-                                  it.value.toIntOrNull()
+                              .map {
+                                  it.value.toIntOrNull() ?: -1
                               }
                               .toList()
 
@@ -334,9 +366,10 @@ jobs:
           }
           EOF
 
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.9'
 
       - name: Compilar APK
         run: gradle --no-daemon :app:assembleDebug
@@ -367,6 +400,7 @@ jobs:
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: MeuImportadorLotofacil-V5-Seguro
+          name: MeuImportadorLotofacil-V5-Corrigido
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 14
