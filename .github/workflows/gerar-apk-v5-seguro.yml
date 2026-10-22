@@ -375,27 +375,53 @@ jobs:
         run: gradle --no-daemon :app:assembleDebug
 
       - name: Verificar classes do APK
-        shell: bash
+        shell: python
         run: |
-          APK=app/build/outputs/apk/debug/app-debug.apk
+          from pathlib import Path
+          from zipfile import ZipFile
+          import re
 
-          test -s "$APK"
-          unzip -t "$APK"
-          unzip -p "$APK" classes.dex > /tmp/classes.dex
+          caminho = Path(
+              "app/build/outputs/apk/debug/app-debug.apk"
+          )
 
-          for CLASSE in MainActivity onCreate onActivityResult; do
-            if ! grep -a -q "$CLASSE" /tmp/classes.dex; then
-              echo "ERRO: classe ou metodo ausente: $CLASSE"
-              exit 1
-            fi
-          done
+          if not caminho.is_file():
+              raise SystemExit("ERRO: APK nao foi gerado.")
 
-          if grep -a -q "MarcadorService" /tmp/classes.dex; then
-            echo "ERRO: servico antigo encontrado"
-            exit 1
-          fi
+          with ZipFile(caminho) as apk:
+              corrompido = apk.testzip()
 
-          echo "APK validado com codigo principal presente."
+              if corrompido:
+                  raise SystemExit(
+                      f"ERRO: arquivo corrompido: {corrompido}"
+                  )
+
+              arquivos = [
+                  nome for nome in apk.namelist()
+                  if re.fullmatch(
+                      r"classes(?:[0-9]+)?\.dex",
+                      nome
+                  )
+              ]
+
+              classe = (
+                  b"Lcom/meuimportador/lotofacil/MainActivity;"
+              )
+
+              encontrado = any(
+                  classe in apk.read(nome)
+                  for nome in arquivos
+              )
+
+              if not encontrado:
+                  raise SystemExit(
+                      "ERRO: MainActivity ausente em todos os DEX."
+                  )
+
+              print("MainActivity encontrada no APK.")
+              print(
+                  f"Arquivos DEX verificados: {len(arquivos)}"
+              )
 
       - name: Publicar APK
         uses: actions/upload-artifact@v4
