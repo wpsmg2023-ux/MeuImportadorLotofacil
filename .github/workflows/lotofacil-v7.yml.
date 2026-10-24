@@ -1,0 +1,482 @@
+
+name: Compilar Lotofacil V7
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Gerar projeto Android
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p app/src/main/java/com/meuimportador/lotofacil app/src/main/res/xml
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "MeuImportadorLotofacil"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.6.1" apply false
+              id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.meuimportador.lotofacil"
+              compileSdk = 35
+
+              defaultConfig {
+                  applicationId = "com.meuimportador.lotofacil"
+                  minSdk = 26
+                  targetSdk = 32
+                  versionCode = 7
+                  versionName = "7.0"
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <application
+                android:label="Lotofacil V7"
+                android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+              <activity
+                  android:name=".MainActivity"
+                  android:exported="true">
+                <intent-filter>
+                  <action android:name="android.intent.action.MAIN"/>
+                  <category android:name="android.intent.category.LAUNCHER"/>
+                </intent-filter>
+              </activity>
+
+              <service
+                  android:name=".LotoAccessibilityService"
+                  android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+                  android:exported="true">
+                <intent-filter>
+                  <action android:name="android.accessibilityservice.AccessibilityService"/>
+                </intent-filter>
+                <meta-data
+                    android:name="android.accessibilityservice"
+                    android:resource="@xml/accessibility_config"/>
+              </service>
+            </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/xml/accessibility_config.xml <<'EOF'
+          <accessibility-service
+            xmlns:android="http://schemas.android.com/apk/res/android"
+            android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+            android:accessibilityFeedbackType="feedbackGeneric"
+            android:notificationTimeout="150"
+            android:canRetrieveWindowContent="true"
+            android:description="@android:string/ok" />
+          EOF
+
+          cat > app/src/main/java/com/meuimportador/lotofacil/MainActivity.kt <<'EOF'
+          package com.meuimportador.lotofacil
+
+          import android.app.Activity
+          import android.os.Bundle
+          import android.content.Intent
+          import android.content.Context
+          import android.content.ClipData
+          import android.content.ClipboardManager
+          import android.net.Uri
+          import android.provider.Settings
+          import android.widget.*
+          import android.graphics.Color
+
+          class MainActivity : Activity() {
+              private val games = mutableListOf<List<Int>>()
+              private var index = 0
+              private lateinit var status: TextView
+              private lateinit var gameText: TextView
+              private lateinit var counter: TextView
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  val scroller = ScrollView(this)
+                  val panel = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(24, 24, 24, 24)
+                      setBackgroundColor(Color.WHITE)
+                  }
+                  scroller.addView(panel)
+
+                  fun label(s: String, size: Float): TextView {
+                      val t = TextView(this).apply {
+                          text = s
+                          textSize = size
+                          setTextColor(Color.BLACK)
+                          setPadding(4, 14, 4, 14)
+                      }
+                      panel.addView(t)
+                      return t
+                  }
+
+                  fun button(s: String, action: () -> Unit) {
+                      panel.addView(Button(this).apply {
+                          text = s
+                          isAllCaps = false
+                          setOnClickListener { action() }
+                      })
+                  }
+
+                  label("LOTOFACIL V7 - VALIDACAO", 24f)
+                  status = label("Importe um TXT com 15 dezenas por linha", 16f)
+                  counter = label("0 jogos", 19f)
+                  gameText = label("--", 24f)
+
+                  button("IMPORTAR TXT") {
+                      val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                          addCategory(Intent.CATEGORY_OPENABLE)
+                          type = "*/*"
+                      }
+                      startActivityForResult(i, 100)
+                  }
+
+                  button("JOGO ANTERIOR") {
+                      if (games.isNotEmpty()) {
+                          index = (index + games.size - 1) % games.size
+                          showGame()
+                      }
+                  }
+
+                  button("PROXIMO JOGO") {
+                      if (games.isNotEmpty()) {
+                          index = (index + 1) % games.size
+                          showGame()
+                      }
+                  }
+
+                  button("COPIAR JOGO") {
+                      if (games.isNotEmpty()) {
+                          val cm = getSystemService(
+                              Context.CLIPBOARD_SERVICE
+                          ) as ClipboardManager
+
+                          cm.setPrimaryClip(
+                              ClipData.newPlainText(
+                                  "Jogo",
+                                  format(games[index])
+                              )
+                          )
+                          toast("Jogo copiado")
+                      }
+                  }
+
+                  button("ABRIR ACESSIBILIDADE") {
+                      startActivity(
+                          Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                      )
+                  }
+
+                  button("VALIDAR VOLANTE ATUAL") {
+                      if (games.isEmpty()) {
+                          toast("Importe os jogos primeiro")
+                      } else {
+                          getSharedPreferences("loto", MODE_PRIVATE)
+                              .edit()
+                              .putString("expected", format(games[index]))
+                              .putBoolean("stop", false)
+                              .apply()
+
+                          startActivity(
+                              Intent(
+                                  Intent.ACTION_VIEW,
+                                  Uri.parse(
+                                      "https://www.loteriasonline.caixa.gov.br/"
+                                  )
+                              )
+                          )
+
+                          toast("Abra a Lotofacil no Chrome e volte para conferir")
+                      }
+                  }
+
+                  button("VER RESULTADO DA LEITURA") {
+                      val p = getSharedPreferences("loto", MODE_PRIVATE)
+                      status.text = p.getString(
+                          "scan",
+                          "Ainda sem leitura do Chrome"
+                      )
+                  }
+
+                  button("PARAR AUTOMACAO") {
+                      getSharedPreferences("loto", MODE_PRIVATE)
+                          .edit()
+                          .putBoolean("stop", true)
+                          .apply()
+
+                      toast("Automacao interrompida")
+                  }
+
+                  label(
+                      "Modo seguro: apenas leitura da tela. Nenhum clique automatico ou compra.",
+                      14f
+                  )
+
+                  setContentView(scroller)
+                  showGame()
+              }
+
+              private fun format(g: List<Int>) =
+                  g.joinToString(" ") {
+                      "%02d".format(it)
+                  }
+
+              private fun showGame() {
+                  counter.text = if (games.isEmpty()) {
+                      "0 jogos"
+                  } else {
+                      "Jogo ${index + 1} de ${games.size}"
+                  }
+
+                  gameText.text = if (games.isEmpty()) {
+                      "--"
+                  } else {
+                      format(games[index])
+                  }
+              }
+
+              private fun toast(s: String) =
+                  Toast.makeText(this, s, Toast.LENGTH_LONG).show()
+
+              @Deprecated("Legacy file picker")
+              override fun onActivityResult(
+                  requestCode: Int,
+                  resultCode: Int,
+                  data: Intent?
+              ) {
+                  super.onActivityResult(
+                      requestCode,
+                      resultCode,
+                      data
+                  )
+
+                  if (
+                      requestCode != 100 ||
+                      resultCode != RESULT_OK
+                  ) return
+
+                  try {
+                      val uri = data?.data ?: return
+
+                      val content = contentResolver
+                          .openInputStream(uri)
+                          ?.bufferedReader()
+                          ?.use { it.readText() }
+                          ?: return
+
+                      val valid = mutableListOf<List<Int>>()
+                      var rejected = 0
+
+                      for (line in content.lines()) {
+                          if (line.isBlank()) continue
+
+                          val tokens = line.trim()
+                              .split(Regex("[^0-9]+"))
+                              .filter { it.isNotEmpty() }
+
+                          val numbers = tokens.mapNotNull {
+                              it.toIntOrNull()
+                          }
+
+                          if (
+                              tokens.size == 15 &&
+                              numbers.size == 15 &&
+                              numbers.distinct().size == 15 &&
+                              numbers.all { it in 1..25 }
+                          ) {
+                              valid.add(numbers.sorted())
+                          } else {
+                              rejected++
+                          }
+                      }
+
+                      if (valid.isEmpty()) {
+                          toast("Nenhum jogo valido")
+                          return
+                      }
+
+                      games.clear()
+                      games.addAll(valid)
+                      index = 0
+
+                      status.text =
+                          "${games.size} jogos validos; $rejected linhas rejeitadas"
+
+                      showGame()
+
+                  } catch (e: Exception) {
+                      toast("Falha: ${e.message}")
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/meuimportador/lotofacil/LotoAccessibilityService.kt <<'EOF'
+          package com.meuimportador.lotofacil
+
+          import android.accessibilityservice.AccessibilityService
+          import android.view.accessibility.AccessibilityEvent
+          import android.view.accessibility.AccessibilityNodeInfo
+
+          class LotoAccessibilityService : AccessibilityService() {
+
+              override fun onAccessibilityEvent(
+                  event: AccessibilityEvent?
+              ) {
+                  if (
+                      event?.packageName?.toString() !=
+                      "com.android.chrome"
+                  ) return
+
+                  val p = getSharedPreferences(
+                      "loto",
+                      MODE_PRIVATE
+                  )
+
+                  if (p.getBoolean("stop", false)) return
+
+                  val root = rootInActiveWindow ?: return
+
+                  try {
+                      val texts = mutableListOf<String>()
+
+                      fun walk(
+                          node: AccessibilityNodeInfo,
+                          depth: Int
+                      ) {
+                          if (
+                              depth > 30 ||
+                              texts.size >= 150
+                          ) return
+
+                          val t = node.text
+                              ?.toString()
+                              ?.trim()
+
+                          if (!t.isNullOrEmpty()) {
+                              texts.add(t.take(80))
+                          }
+
+                          for (i in 0 until node.childCount) {
+                              val child = node.getChild(i)
+                                  ?: continue
+
+                              try {
+                                  walk(child, depth + 1)
+                              } finally {
+                                  child.recycle()
+                              }
+                          }
+                      }
+
+                      walk(root, 0)
+
+                      val joined = texts.joinToString(" | ")
+
+                      if (
+                          joined.contains("Lotof", true) ||
+                          joined.contains("Volante", true) ||
+                          joined.contains(
+                              "Preencha sua aposta",
+                              true
+                          )
+                      ) {
+                          val numbers = texts.filter {
+                              it.matches(
+                                  Regex("0?[1-9]|1[0-9]|2[0-5]")
+                              )
+                          }
+
+                          p.edit()
+                              .putString(
+                                  "scan",
+                                  "Chrome detectado. Dezenas visiveis: " +
+                                  numbers.distinct().joinToString(" ") +
+                                  ". Elementos de texto: ${texts.size}. " +
+                                  "Ainda nao verifica selecao."
+                              )
+                              .apply()
+                      }
+
+                  } finally {
+                      root.recycle()
+                  }
+              }
+
+              override fun onInterrupt() {}
+          }
+          EOF
+
+      - name: Compilar APK
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Publicar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lotofacil-V7-Validacao
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
